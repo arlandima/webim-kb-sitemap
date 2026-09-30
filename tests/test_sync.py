@@ -48,7 +48,7 @@ def test_full_incremental_cycle(tmp_path):
     s1 = sync(site, crawler, store, settings, emb)
     assert s1["new"] == 3 and s1["updated"] == 0 and s1["failed"] == 0  # главная + А + Б
     n_chunks = store.counts()["chunks"]
-    assert n_chunks >= 3 and emb.calls == store.counts()["embedded_chunks"]
+    assert n_chunks >= 3 and emb.calls >= store.counts()["embedded_chunks"]  # чанки + заголовки
 
     # ничего не изменилось: ни перезагрузки страниц, ни повторных эмбеддингов
     calls_before, hits_before = emb.calls, len(site.hits)
@@ -62,7 +62,7 @@ def test_full_incremental_cycle(tmp_path):
     site.lastmod["/kb/b.html"] = "2026-02-02"
     s3 = sync(site, crawler, store, settings, emb)
     assert s3["updated"] == 1 and s3["new"] == 0 and s3["unchanged"] == 2
-    assert 0 < emb.calls - calls_before <= 2
+    assert 0 < emb.calls - calls_before <= 4  # изменённый чанк и его заголовок
     hit = store.lexical("вебхуки")
     assert hit and not store.lexical("сценарии")  # старый текст исчез из индекса
 
@@ -80,7 +80,7 @@ def test_full_incremental_cycle(tmp_path):
     assert store.counts()["articles"] == 3
 
 
-def test_failed_page_is_kept_not_deleted(tmp_path):
+def test_failed_page_is_kept_not_deleted(tmp_path, monkeypatch):
     site, crawler, store, settings = setup(tmp_path)
     sync(site, crawler, store, settings, None, embed=False)
     # страница «падает» (500), но остаётся в sitemap -> данные не теряем
@@ -94,7 +94,7 @@ def test_failed_page_is_kept_not_deleted(tmp_path):
     site.lastmod["/kb/a.html"] = "2026-03-03"
     crawler.client = httpx.Client(transport=httpx.MockTransport(flaky), follow_redirects=False)
     import webim_ai.crawler as cm
-    cm.time.sleep = lambda s: None
+    monkeypatch.setattr(cm.time, "sleep", lambda s: None)
     crawler.cache_dir  # кэш остаётся, но force-обновление по новому lastmod упадёт
     s = sync(site, crawler, store, settings, None, embed=False)
     assert BASE + "a.html" in store.all_article_urls()

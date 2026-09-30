@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS articles(
   content_hash TEXT, doc TEXT, nchunks INTEGER DEFAULT 0, fetched_at REAL, description TEXT, links TEXT);
 CREATE TABLE IF NOT EXISTS chunks(
   id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL, ord INTEGER, part INTEGER DEFAULT 0, anchor TEXT,
-  heading_path TEXT, title TEXT, text TEXT, embed_hash TEXT);
+  heading_path TEXT, title TEXT, text TEXT, embed_hash TEXT, head_hash TEXT);
 CREATE INDEX IF NOT EXISTS chunks_url ON chunks(url);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(title, headings, body, tokenize='unicode61 remove_diacritics 0');
 CREATE TABLE IF NOT EXISTS embeddings(embed_hash TEXT, model TEXT, dim INTEGER, vec BLOB, PRIMARY KEY(embed_hash, model));
@@ -36,6 +36,10 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.lock = threading.RLock()
         self.conn.executescript(SCHEMA)
+        try:  # миграция старых индексов
+            self.conn.execute('ALTER TABLE chunks ADD COLUMN head_hash TEXT')
+        except sqlite3.OperationalError:
+            pass
 
     def close(self) -> None:
         self.conn.close()
@@ -72,7 +76,7 @@ class Store:
             self.conn.execute("UPDATE articles SET lastmod=?, fetched_at=? WHERE url=?", (lastmod, time.time(), url))
             self.conn.commit()
 
-    def upsert_article(self, a, lastmod: str | None, chunks: list[Chunk], embed_hashes: list[str]) -> None:
+    def upsert_article(self, a, lastmod: str | None, chunks: list[Chunk], embed_hashes: list[str], head_hashes: list[str] | None = None) -> None:
         """Атомарно заменяет статью и все её чанки (провенанс сохраняется в каждом чанке)."""
         with self.lock, self.conn:
             self._delete_chunks(a.url)
@@ -86,10 +90,11 @@ class Store:
                  json.dumps([{"level": s.level, "heading": s.heading, "anchor": s.anchor, "path": s.path, "blocks": s.blocks}
                              for s in a.sections], ensure_ascii=False),
                  len(chunks), time.time(), a.description, json.dumps(a.links)))
-            for c, eh in zip(chunks, embed_hashes):
+            head_hashes = head_hashes or [None] * len(chunks)
+            for c, eh, hh in zip(chunks, embed_hashes, head_hashes):
                 cur = self.conn.execute(
-                    "INSERT INTO chunks(url,ord,part,anchor,heading_path,title,text,embed_hash) VALUES(?,?,?,?,?,?,?,?)",
-                    (c.url, c.ord, c.part, c.anchor, json.dumps(c.heading_path, ensure_ascii=False), c.title, c.text, eh))
+                    "INSERT INTO chunks(url,ord,part,anchor,heading_path,title,text,embed_hash,head_hash) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (c.url, c.ord, c.part, c.anchor, json.dumps(c.heading_path, ensure_ascii=False), c.title, c.text, eh, hh))
                 heads = " ".join(c.heading_path[1:]) if len(c.heading_path) > 1 else c.heading_path[0]
                 self.conn.execute("INSERT INTO chunks_fts(rowid,title,headings,body) VALUES(?,?,?,?)",
                                   (cur.lastrowid, fts_index_text(c.title), fts_index_text(heads), fts_index_text(c.text)))
@@ -107,7 +112,7 @@ class Store:
 
     def gc_embeddings(self) -> int:
         with self.lock, self.conn:
-            cur = self.conn.execute("DELETE FROM embeddings WHERE embed_hash NOT IN (SELECT DISTINCT embed_hash FROM chunks)")
+            cur = self.conn.execute("DELETE FROM embeddings WHERE embed_hash NOT IN (SELECT embed_hash FROM chunks UNION SELECT head_hash FROM chunks WHERE head_hash IS NOT NULL)")
             return cur.rowcount
 
     # ---------- эмбеддинги ----------
@@ -145,9 +150,10 @@ class Store:
         q = ",".join("?" * len(ids))
         return {r["id"]: r for r in self.conn.execute(f"SELECT * FROM chunks WHERE id IN ({q})", ids)}
 
-    def load_matrix(self, model: str) -> tuple[list[int], np.ndarray | None]:
+    def load_matrix(self, model: str, col: str = "embed_hash") -> tuple[list[int], np.ndarray | None]:
+        assert col in ("embed_hash", "head_hash")
         rows = self.conn.execute(
-            "SELECT c.id, e.vec FROM chunks c JOIN embeddings e ON e.embed_hash=c.embed_hash AND e.model=? ORDER BY c.id", (model,)).fetchall()
+            f"SELECT c.id, e.vec FROM chunks c JOIN embeddings e ON e.embed_hash=c.{col} AND e.model=? ORDER BY c.id", (model,)).fetchall()
         if not rows:
             return [], None
         ids = [r["id"] for r in rows]

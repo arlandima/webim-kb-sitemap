@@ -11,7 +11,7 @@
     {"id":"S8","cat":"simple","q":"горячие клавиши для оператора","expect":["for-agents/online-work-with-visitors/hotkeys.html","for-admins/hotkeys-binding.html"]},
 
     {"id":"V1","cat":"paraphrase","q":"как сделать чтобы клиент сначала написал вопрос и только потом создавался чат","expect":["control-panel/buttons-and-locations/chat-window.html","for-admins/dept.html","for-admins/start-chat-features.html"]},
-    {"id":"V2","cat":"paraphrase","q":"почему мне не приходят звуковые уведомления о новых сообщениях","expect":["for-agents/enable-chrome-notifications.html","for-agents/enable-yandex-notifications.html"]},
+    {"id":"V2","cat":"paraphrase","q":"почему мне не приходят звуковые уведомления о новых сообщениях","expect":["for-agents/enable-chrome-notifications.html","for-agents/enable-yandex-notifications.html","for-agents/online-work-with-visitors/detect-new-visitor.html"]},
     {"id":"V3","cat":"paraphrase","q":"клиент написал ночью, когда никого нет на месте — куда попадёт его сообщение","expect":["for-agents/work-with-offline-requests.html","for-admins/dialog-kinds-and-missed-chats.html"]},
     {"id":"V4","cat":"paraphrase","q":"как поставить диалог на паузу, пока я ищу ответ для клиента","expect":["for-agents/online-work-with-visitors/chats-on-hold.html"]},
     {"id":"V5","cat":"paraphrase","q":"как узнать, в каком городе находится посетитель сайта","expect":["for-admins/visitor-location.html"]},

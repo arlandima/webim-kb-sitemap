@@ -244,7 +244,12 @@ h1,h2,h3{color:var(--navy);line-height:1.2;margin:0}
   .header-row{height:58px;gap:12px}
   .brand-name{display:none}.brand-sep{display:none}
   .main-nav{margin-left:0}
-  .main-nav a{padding:7px 10px;font-size:14px}
+  .main-nav{gap:0}
+  .main-nav a{padding:6px 9px;font-size:13.5px}
+  .brand img{width:78px;height:auto}
+  .header-row{gap:8px}
+  .follow .ask{flex-direction:row;align-items:flex-end;padding:6px 6px 6px 14px}
+  .follow .ask .btn{width:auto;padding:0 18px}
   .ghost-link{display:none}
   .hero{padding:36px 0 34px}
   .ask{flex-direction:column;align-items:stretch;padding:8px 14px 12px}
@@ -265,3 +270,12 @@ h1,h2,h3{color:var(--navy);line-height:1.2;margin:0}
   .foot-note{margin-left:0;width:100%}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* защита от горизонтального переполнения на узких экранах */
+.browse>*,.reader-wrap{min-width:0}
+.reader pre{max-width:100%}
+.reader img,.reader table{max-width:100%}
+.kv{display:block;overflow-x:auto;max-width:100%}
+@media (max-width:820px){.kv th{width:auto}.kv td,.kv th{white-space:normal}}
+body{overflow-x:clip}
+@media (max-width:820px){.browse{grid-template-columns:minmax(0,1fr)}}

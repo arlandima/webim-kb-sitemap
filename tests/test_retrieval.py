@@ -92,3 +92,10 @@ def test_lexical_only_mode_still_works():
     r = Retriever(st, None, None)
     res = r.search("подключение Elasticsearch")
     assert top(res)[0] == "es.html" and res.modes == {"lexical": True, "semantic": False, "rerank": False}
+
+
+def test_unknown_entity_forces_abstention(retr):
+    res = retr.search("как подключить интеграцию с Bitrix24")
+    assert res.unknown_terms == ["Bitrix24"] and not res.confident
+    res = retr.search("как подключить Elasticsearch")  # известное название — обычный поиск
+    assert res.unknown_terms == [] and res.confident

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from .parser import Article, Section, blocks_to_text
 
-CHUNKER_VERSION = 2  # при изменении правил разбиения индекс пересобирается из сохранённых статей без обращения к сети
+CHUNKER_VERSION = 3  # при изменении правил разбиения индекс пересобирается из сохранённых статей без обращения к сети
 MAX_CHARS = 1600
 TARGET_CHARS = 1100
 MIN_CHARS = 110
@@ -25,6 +25,12 @@ class Chunk:
     @property
     def source_url(self) -> str:
         return self.url + (f"#{self.anchor}" if self.anchor else "")
+
+    @property
+    def head_text(self) -> str:
+        """Заголовок статьи + путь разделов — короткий текст для отдельного «заголовочного» эмбеддинга."""
+        path = " › ".join(self.heading_path[1:]) if len(self.heading_path) > 1 else ""
+        return f"{self.title}" + (f" › {path}" if path else "")
 
     @property
     def embed_text(self) -> str:

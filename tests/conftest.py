@@ -70,14 +70,14 @@ def build_store(pages: dict, embedder=None):
     from webim_ai.chunker import chunk_article
     from webim_ai.parser import parse_article
     from webim_ai.store import Store
-    from webim_ai.sync import embed_hash, embed_missing
+    from webim_ai.sync import embed_missing, hashes
 
     st = Store(":memory:")
     for url, (title, secs) in pages.items():
         a = parse_article(make_page(title, secs, canonical=url), url)
         a.breadcrumbs = [{"title": "Раздел", "url": "https://webim.ru/kb/raздел/"}]
         ch = chunk_article(a)
-        st.upsert_article(a, None, ch, [embed_hash(c.embed_text) for c in ch])
+        st.upsert_article(a, None, ch, *hashes(ch))
     if embedder is not None:
         embed_missing(st, embedder, log=lambda *_: None)
     return st

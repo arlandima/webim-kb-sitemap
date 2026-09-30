@@ -34,7 +34,7 @@ EMBEDDERS = {
 }
 RERANKERS = {
     "bge-reranker-v2-m3": ModelSpec("bge-reranker-v2-m3", "onnx-community/bge-reranker-v2-m3-ONNX",
-                                    ("onnx/model_int8.onnx", "tokenizer.json"), "onnx/model_int8.onnx", "tokenizer.json", max_len=512),
+                                    ("onnx/model_int8.onnx", "tokenizer.json"), "onnx/model_int8.onnx", "tokenizer.json", max_len=320),
     "jina-reranker-v2": ModelSpec("jina-reranker-v2", "jinaai/jina-reranker-v2-base-multilingual",
                                   ("onnx/model_int8.onnx", "tokenizer.json"), "onnx/model_int8.onnx", "tokenizer.json", max_len=512),
 }

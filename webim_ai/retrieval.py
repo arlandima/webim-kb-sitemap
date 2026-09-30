@@ -9,7 +9,9 @@ from dataclasses import dataclass, field, asdict
 import numpy as np
 
 from .store import Store
-from .text import highlight_terms, query_terms
+from .text import highlight_terms, normalize, query_terms, stem_token
+
+_ENTITY = re.compile(r"[A-Za-z][A-Za-z0-9]{3,}")
 
 RRF_K = 60
 
@@ -46,6 +48,7 @@ class SearchResult:
     confidence: float
     timings: dict
     modes: dict
+    unknown_terms: list[str] = field(default_factory=list)  # названия из вопроса, которых нет нигде в Базе знаний
 
 
 def make_excerpt(text: str, query: str, width: int = 340) -> tuple[str, list[list[int]]]:
@@ -91,35 +94,47 @@ def _coverage(qterms: set[str], text: str) -> float:
 
 
 class Retriever:
-    def __init__(self, store: Store, embedder=None, reranker=None, rerank_candidates: int = 14):
+    def __init__(self, store: Store, embedder=None, reranker=None, rerank_candidates: int = 20):
         self.store = store
         self.embedder = embedder
         self.reranker = reranker
         self.rerank_candidates = rerank_candidates
         self.ids: list[int] = []
         self.matrix: np.ndarray | None = None
+        self.head_ids: list[int] = []
+        self.head_matrix: np.ndarray | None = None
         self.reload()
 
     def reload(self) -> None:
         if self.embedder is not None:
             self.ids, self.matrix = self.store.load_matrix(self.embedder.name)
+            self.head_ids, self.head_matrix = self.store.load_matrix(self.embedder.name + "#head", "head_hash")
         else:
             self.ids, self.matrix = [], None
+            self.head_ids, self.head_matrix = [], None
+        self._meta = {}
 
     # ---------- этапы ----------
-    def semantic(self, query: str, limit: int = 40) -> tuple[list[tuple[int, float]], float]:
+    def semantic(self, query: str, limit: int = 40) -> tuple[list[tuple[int, float]], float, list[tuple[int, float]]]:
         if self.embedder is None or self.matrix is None or not len(self.ids):
-            return [], 0.0
+            return [], 0.0, []
         t = time.perf_counter()
         qv = self.embedder.embed_query(query)
         t_embed = (time.perf_counter() - t) * 1000
         sims = self.matrix @ qv
         top = np.argpartition(-sims, min(limit, len(sims) - 1))[:limit]
         top = top[np.argsort(-sims[top])]
-        return [(self.ids[i], float(sims[i])) for i in top], t_embed
+        head: list[tuple[int, float]] = []
+        if self.head_matrix is not None:  # заголовочный сигнал; считается тем же вектором запроса
+            hs = self.head_matrix @ qv
+            ht = np.argpartition(-hs, min(limit, len(hs) - 1))[:limit]
+            ht = ht[np.argsort(-hs[ht])]
+            head = [(self.head_ids[i], float(hs[i])) for i in ht]
+        return [(self.ids[i], float(sims[i])) for i in top], t_embed, head
 
     @staticmethod
-    def fuse(lex: list[tuple[int, float]], sem: list[tuple[int, float]], w_lex: float = 1.0, w_sem: float = 1.0) -> dict[int, dict]:
+    def fuse(lex: list[tuple[int, float]], sem: list[tuple[int, float]], w_lex: float = 1.0, w_sem: float = 1.0,
+             head: list[tuple[int, float]] | None = None, w_head: float = 0.8) -> dict[int, dict]:
         """Reciprocal Rank Fusion: сумма w/(k+rank) по обоим спискам."""
         out: dict[int, dict] = {}
         for r, (cid, s) in enumerate(lex, 1):
@@ -130,6 +145,10 @@ class Retriever:
             e = out.setdefault(cid, {"rrf": 0.0})
             e["rrf"] += w_sem / (RRF_K + r)
             e["sem_rank"], e["cos"] = r, s
+        for r, (cid, s) in enumerate(head or [], 1):
+            e = out.setdefault(cid, {"rrf": 0.0})
+            e["rrf"] += w_head / (RRF_K + r)
+            e["head_rank"], e["head_cos"] = r, s
         return out
 
     def search(self, query: str, k: int = 8, rerank: bool = True, articles_n: int = 8) -> SearchResult:
@@ -144,12 +163,12 @@ class Retriever:
         timings["lexical_ms"] = round((time.perf_counter() - t) * 1000, 1)
 
         t = time.perf_counter()
-        sem, t_embed = self.semantic(query, 40)
+        sem, t_embed, head = self.semantic(query, 40)
         timings["semantic_ms"] = round((time.perf_counter() - t) * 1000, 1)
         timings["query_embedding_ms"] = round(t_embed, 1)
 
         t = time.perf_counter()
-        fused = self.fuse(lex, sem)
+        fused = self.fuse(lex, sem, head=head)
         ranked = sorted(fused.items(), key=lambda kv: -kv[1]["rrf"])
         cand_ids = [cid for cid, _ in ranked[:30]]
         rows = self.store.chunk_rows(cand_ids)
@@ -168,6 +187,9 @@ class Retriever:
         hits = self._build_hits(query, cand_ids, rows, fused, rr_scores)
         hits.sort(key=lambda h: -h.score)
         conf = self._confidence(query, hits, bool(rr_scores))
+        unknown = self.unknown_terms(query)
+        if unknown:  # вопрос про сущность, которой нет в документации — не отвечаем по «похожему»
+            conf = (False, conf[1])
         hits = self._diversify(hits, k)
 
         art: dict[str, dict] = {}
@@ -182,7 +204,28 @@ class Retriever:
                 a["sections"].append({"heading_path": h.heading_path, "source_url": h.source_url})
         timings["total_ms"] = round((time.perf_counter() - t_all) * 1000, 1)
         modes = {"lexical": True, "semantic": self.matrix is not None, "rerank": bool(rr_scores)}
-        return SearchResult(query, hits, list(art.values()), conf[0], conf[1], timings, modes)
+        return SearchResult(query, hits, list(art.values()), conf[0], conf[1], timings, modes, unknown)
+
+    def unknown_terms(self, query: str) -> list[str]:
+        """Латинские «названия» в вопросе (с заглавной буквы не в начале или с цифрой), которых нет во всём индексе: Bitrix24, Signal…"""
+        out = []
+        for m in _ENTITY.finditer(query):
+            w = m.group(0)
+            if not (any(c.isdigit() for c in w) or (w[0].isupper() and m.start() > 0)):
+                continue
+            tok = stem_token(normalize(w))
+            if self._df(tok) == 0:
+                out.append(w)
+        return out
+
+    def _df(self, tok: str) -> int:
+        cache = self.__dict__.setdefault("_df_cache", {})
+        if tok not in cache:
+            try:
+                cache[tok] = self.store.conn.execute("SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?", ('"%s"' % tok.replace('"', ""),)).fetchone()[0]
+            except Exception:
+                cache[tok] = 1
+        return cache[tok]
 
     # ---------- внутреннее ----------
     def _rerank_doc(self, r) -> str:
@@ -238,7 +281,9 @@ class Retriever:
             return False, 0.0
         top = hits[0]
         if reranked:
-            return top.score >= RERANK_MIN, top.score
+            sc = top.scores
+            backed = sc.get("lex_rank", 99) <= 2 or sc.get("sem_rank", 99) == 1 or sc.get("head_rank", 99) == 1
+            return top.score >= RERANK_MIN or (top.score >= RERANK_WEAK and backed), top.score
         if self.matrix is None:
             return top.scores.get("coverage", 0.0) >= 0.6 and "lex_rank" in top.scores, top.score
         cos = top.scores.get("cos", 0.0)
@@ -257,4 +302,5 @@ class Retriever:
         return out
 
 
-RERANK_MIN = 0.12  # калибруется по eval/questions.yaml (см. docs/ARCHITECTURE.md)
+RERANK_MIN = 0.12  # порог уверенного попадания; калибровка по eval/questions.json (см. docs/ARCHITECTURE.md)
+RERANK_WEAK = 0.05  # слабый сигнал реранкера допустим, только если лучший чанк независимо подтверждён лексикой/семантикой

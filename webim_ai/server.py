@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -17,7 +18,7 @@ from .answer import INSUFFICIENT, answer_stream, get_provider
 from .config import ROOT, get_settings
 from .crawler import canonicalize
 from .models import load_embedder, load_reranker
-from .retrieval import Retriever, RERANK_MIN
+from .retrieval import Retriever, RERANK_MIN, RERANK_WEAK
 from .store import Store
 
 log = logging.getLogger("webim_ai")
@@ -94,32 +95,43 @@ class AskBody(BaseModel):
 
 
 def create_app(state: AppState | None = None) -> FastAPI:
-    app = FastAPI(title="Webim AI Knowledge", version=__version__, docs_url="/api/docs", redoc_url=None)
     holder: dict = {"s": state}
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        S()  # модели загружаются при старте, а не при первом запросе
+        yield
+
+    app = FastAPI(title="Webim AI Knowledge", version=__version__, docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
 
     def S() -> AppState:
         if holder["s"] is None:
             holder["s"] = AppState()
         return holder["s"]
 
-    @app.on_event("startup")  # noqa
-    def _startup():
-        S()
-
     # ---------- поиск ----------
     def evidence_for(res, k: int):
+        """Лучший фрагмент берём всегда; остальные — только если они заметно релевантны (не тянем случайные разделы в ответ)."""
         hits = res.hits[:k]
         if res.modes.get("rerank") and hits:
             top = hits[0].score
-            hits = [h for h in hits if h.score >= max(RERANK_MIN * 0.8, 0.3 * top)]
+            hits = hits[:1] + [h for h in hits[1:] if h.score >= max(RERANK_WEAK, 0.25 * top)]
         return hits[: min(k, 5)]
+
+    def relevant_articles(arts):
+        """Список статей без «шума»: слабые совпадения скрываем, но минимум 3 оставляем (пользователю всегда есть куда перейти)."""
+        if not arts:
+            return arts
+        top = arts[0]["score"]
+        keep = [a for a in arts if a["score"] >= max(0.02, 0.15 * top)]
+        return keep if len(keep) >= 3 else arts[:3]
 
     def retrieval_payload(res, evidence):
         return {
-            "query": res.query, "confident": res.confident, "confidence": round(res.confidence, 3), "modes": res.modes,
+            "query": res.query, "confident": res.confident, "unknown_terms": res.unknown_terms, "confidence": round(res.confidence, 3), "modes": res.modes,
             "timings": res.timings,
             "evidence": [dict(h.to_dict(), n=i + 1) for i, h in enumerate(evidence)],
-            "articles": res.articles,
+            "articles": relevant_articles(res.articles),
         }
 
     def retrieval_query(q: str, history: list[dict]) -> str:

@@ -60,7 +60,7 @@ async function route() {
 }
 
 /* ---------- поле вопроса ---------- */
-function askBox({ id = "q", value = "", placeholder = "Например: как сделать, чтобы клиент сначала написал вопрос, а чат создавался потом?", btn = "Найти ответ", rows = 1 } = {}) {
+function askBox({ id = "q", value = "", placeholder = "Задайте вопрос своими словами — например, как поставить диалог на паузу?", btn = "Найти ответ", rows = 1 } = {}) {
   return `<form class="ask" data-ask role="search" aria-label="Задать вопрос">
     <label class="sr" for="${id}" style="position:absolute;left:-999px">Ваш вопрос</label>
     <textarea id="${id}" class="q-input" rows="${rows}" maxlength="600" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="true">${esc(value)}</textarea>
@@ -234,9 +234,9 @@ function finishAnswer(holder, main, d, final, { scen, debug, q, append }) {
   if (!d.confident || !final || final.mode === "insufficient") {
     const rel = (d.articles || []).slice(0, 3);
     card.outerHTML = `<div class="card insufficient"><h2>В Базе знаний Webim недостаточно информации для надёжного ответа</h2>
-      <p>Мы не нашли в документации подтверждения, на которое можно опереться, поэтому не станем гадать. Ниже — материалы, которые могут быть близки по теме.</p>
+      <p>${(d.unknown_terms || []).length ? `В Базе знаний нет упоминаний: <strong>${d.unknown_terms.map(esc).join(", ")}</strong>. ` : ""}Мы не нашли в документации подтверждения, на которое можно опереться, поэтому не станем гадать. Ниже — материалы, которые могут быть близки по теме.</p>
       <div class="row"><a class="btn small" href="https://webim.ru/kb/" target="_blank" rel="noopener">Открыть Базу знаний ${ICON_EXT}</a>
-      <a class="btn small secondary" href="/browse" data-link>Посмотреть похожие материалы</a></div></div>`;
+      <button class="btn small secondary" type="button" data-similar>Посмотреть похожие материалы</button></div></div>`;
     if (rel.length) holder.insertAdjacentHTML("beforeend", `<h2 class="h-sec">Возможно, пригодится</h2><ol class="sources">${rel.map((a, i) => sourceCard({ ...a.best, n: i + 1, title: a.title, breadcrumbs: a.breadcrumbs })).join("")}</ol>`);
     holder.insertAdjacentHTML("beforeend", `<p class="crumbs" style="margin-top:18px">Если вопрос касается вашей настройки Webim, можно <a href="https://webim.ru/" target="_blank" rel="noopener">обратиться в поддержку</a>.</p>`);
   } else {
@@ -261,6 +261,7 @@ function finishAnswer(holder, main, d, final, { scen, debug, q, append }) {
     const one = e.target.closest("[data-inspect]");
     if (one) openInspector(d, Number(one.dataset.inspect));
     if (e.target.closest("[data-inspect-all]")) openInspector(d, null);
+    if (e.target.closest("[data-similar]")) holder.querySelector(".h-sec")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 
@@ -318,7 +319,7 @@ async function viewBrowse(u) {
       const det = li.querySelector(":scope > details"); if (det && v) det.open = true;
     });
   });
-  const cur = $("#tr a.cur"); if (cur) cur.scrollIntoView({ block: "center" });
+  const cur = $("#tr a.cur"); if (cur) { const pane = $("#tp"); pane.scrollTop = Math.max(0, cur.offsetTop - pane.clientHeight / 2); }
   const rd = $("#rd");
   if (!url) {
     const sg = await suggestions();

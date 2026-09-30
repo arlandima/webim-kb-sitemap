@@ -63,7 +63,7 @@ def test_redirect_within_scope_and_out_of_scope(tmp_path):
     assert r.status != 200 and r.html is None and "за пределы" in (r.error or "")
 
 
-def test_failed_requests_retry_and_negative_cache(tmp_path):
+def test_failed_requests_retry_and_negative_cache(tmp_path, monkeypatch):
     n = {"503": 0, "404": 0}
 
     def h(req):
@@ -78,7 +78,7 @@ def test_failed_requests_retry_and_negative_cache(tmp_path):
     c = _crawler(tmp_path, h)
     c.max_retries = 3
     import webim_ai.crawler as cm
-    cm.time.sleep = lambda s: None
+    monkeypatch.setattr(cm.time, "sleep", lambda s: None)
     assert c.fetch("https://webim.ru/kb/flaky.html").status == 200 and n["503"] == 2
     assert c.fetch("https://webim.ru/kb/gone.html").status == 404
     assert c.fetch("https://webim.ru/kb/gone.html").status == 404 and n["404"] == 1  # негативный кэш
@@ -95,7 +95,7 @@ def test_out_of_scope_never_requested(tmp_path):
     assert c.fetch("https://webim.ru/blog/x.html").status == 0
 
 
-def test_discover_uses_live_sitemap_then_fallback(tmp_path):
+def test_discover_uses_live_sitemap_then_fallback(tmp_path, monkeypatch):
     def h(req):
         if req.url.path == "/kb/sitemap.xml":
             return httpx.Response(200, text="<urlset><url><loc>https://webim.ru/kb/z.html</loc></url></urlset>")
@@ -108,7 +108,7 @@ def test_discover_uses_live_sitemap_then_fallback(tmp_path):
         return httpx.Response(500)
 
     import webim_ai.crawler as cm
-    cm.time.sleep = lambda s: None
+    monkeypatch.setattr(cm.time, "sleep", lambda s: None)
     c2 = _crawler(tmp_path / "2", down)
     f = tmp_path / "fallback.xml"
     f.write_text("<urlset><url><loc>https://webim.ru/kb/old.html</loc></url></urlset>")

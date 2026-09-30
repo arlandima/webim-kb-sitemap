@@ -22,6 +22,14 @@ def embed_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
+def head_hash(text: str) -> str:
+    return hashlib.sha1(("H|" + text).encode("utf-8")).hexdigest()
+
+
+def hashes(chunks) -> tuple[list[str], list[str]]:
+    return [embed_hash(c.embed_text) for c in chunks], [head_hash(c.head_text) for c in chunks]
+
+
 def run_sync(settings=None, store: Store | None = None, crawler: Crawler | None = None, embedder=None, *, force: bool = False,
              full_check: bool = False, follow_links: bool = True, limit: int | None = None, embed: bool = True,
              log=print, extra_sitemaps: list[Path] | None = None) -> dict:
@@ -59,7 +67,7 @@ def run_sync(settings=None, store: Store | None = None, crawler: Crawler | None 
             stats["unchanged"] += 1
             hashes_seen[prev["content_hash"]] = url
             if follow_links and not limit:  # ссылки неизменённой статьи берём из индекса
-                for l in json.loads(prev["links"] or "[]"):
+                for l in filter(None, (canonicalize(x) for x in json.loads(prev["links"] or "[]"))):
                     if l not in seen and l not in queue and l not in sitemap:
                         queue.append(l)
                         stats["link_discovered"] += 1
@@ -95,7 +103,7 @@ def run_sync(settings=None, store: Store | None = None, crawler: Crawler | None 
             store.touch_article(url, lastmod)
         else:
             chunks = chunk_article(art)
-            store.upsert_article(art, lastmod, chunks, [embed_hash(c.embed_text) for c in chunks])
+            store.upsert_article(art, lastmod, chunks, *hashes(chunks))
             stats["chunks_updated"] += len(chunks)
             stats["new" if prev is None else "updated"] += 1
             log(f"  {'+' if prev is None else '~'} {art.title}  ({len(chunks)} чанков)")
@@ -138,12 +146,35 @@ def rechunk_all(store: Store, log=print) -> int:
         a = store.load_article(u)
         meta = store.get_article_meta(u)
         chunks = chunk_article(a)
-        store.upsert_article(a, meta["lastmod"], chunks, [embed_hash(c.embed_text) for c in chunks])
+        store.upsert_article(a, meta["lastmod"], chunks, *hashes(chunks))
     log(f"Чанки пересобраны для {len(urls)} статей (версия разбиения {CHUNKER_VERSION})")
     return len(urls)
 
 
 def embed_missing(store: Store, embedder, log=print, batch: int = 16) -> int:
+    return _embed_chunks(store, embedder, log, batch) + _embed_headings(store, embedder, log)
+
+
+def _embed_headings(store: Store, embedder, log=print) -> int:
+    """Короткие эмбеддинги «Статья › Раздел» — отдельный сигнал для вопросов, сформулированных как название темы."""
+    rows = store.conn.execute("SELECT DISTINCT head_hash, title, heading_path FROM chunks WHERE head_hash IS NOT NULL").fetchall()
+    key = embedder.name + "#head"
+    have = store.get_embeddings([r["head_hash"] for r in rows], key)
+    todo = [r for r in rows if r["head_hash"] not in have]
+    if not todo:
+        return 0
+    log(f"Эмбеддинги заголовков: {len(todo)}")
+    for i in range(0, len(todo), 128):
+        part = todo[i:i + 128]
+        texts = []
+        for r in part:
+            hp = json.loads(r["heading_path"])
+            texts.append(r["title"] + (" › " + " › ".join(hp[1:]) if len(hp) > 1 else ""))
+        store.put_embeddings({r["head_hash"]: v for r, v in zip(part, embedder.embed_passages(texts, 32))}, key)
+    return len(todo)
+
+
+def _embed_chunks(store: Store, embedder, log=print, batch: int = 16) -> int:
     rows = store.conn.execute("SELECT DISTINCT embed_hash, title, heading_path, text FROM chunks").fetchall()
     have = store.get_embeddings([r["embed_hash"] for r in rows], embedder.name)
     todo = [r for r in rows if r["embed_hash"] not in have]
