@@ -74,3 +74,11 @@ def test_status(client):
 def test_spa_fallback_and_api_404(client):
     assert client.get("/demo").status_code == 200 and "<title>" in client.get("/browse").text
     assert client.get("/api/unknown").status_code == 404
+
+
+def test_sections_and_scoped_ask(client):
+    secs = client.get("/api/sections").json()
+    assert isinstance(secs, list) and all({"key", "title", "count"} <= set(x) for x in secs)
+    ev = dict(sse(client.post("/api/ask", json={"q": "подключение кластера", "section": "devops"}).text))
+    assert all("/kb/devops/" in e["url"] for e in ev["retrieval"]["evidence"])
+    assert client.post("/api/ask", json={"q": "x", "section": "../etc"}).status_code == 422

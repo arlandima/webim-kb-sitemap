@@ -33,7 +33,7 @@ class AppState:
         self.embedder = self._load(embedder, lambda: load_embedder(self.settings.embed_model), "эмбеддинги")
         self.reranker = self._load(reranker, lambda: load_reranker(self.settings.rerank_model), "реранкер")
         self.provider = get_provider(self.settings) if provider == "auto" else provider
-        self.retriever = Retriever(self.store, self.embedder, self.reranker)
+        self.retriever = Retriever(self.store, self.embedder, self.reranker, self.settings.rerank_candidates)
         self.started = time.time()
         self.recent = deque(maxlen=50)
         self._tree = None
@@ -92,6 +92,7 @@ class AskBody(BaseModel):
     q: str = Field(..., min_length=1, max_length=600)
     history: list[dict] = []
     k: int = 5
+    section: str | None = Field(None, max_length=60, pattern=r"^[a-z0-9-]+$")
 
 
 def create_app(state: AppState | None = None) -> FastAPI:
@@ -142,9 +143,9 @@ def create_app(state: AppState | None = None) -> FastAPI:
         return q
 
     @app.get("/api/search")
-    def api_search(q: str = Query(..., min_length=1, max_length=600), k: int = 8):
+    def api_search(q: str = Query(..., min_length=1, max_length=600), k: int = 8, section: str | None = Query(None, pattern=r"^[a-z0-9-]+$")):
         s = S()
-        res = s.retriever.search(q, k=max(1, min(k, 20)))
+        res = s.retriever.search(q, k=max(1, min(k, 20)), section=section)
         s.recent.append({"q": q, **res.timings, "t": time.time()})
         return retrieval_payload(res, res.hits)
 
@@ -157,7 +158,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
                 return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
             try:
                 rq = retrieval_query(body.q, body.history)
-                res = s.retriever.search(rq, k=max(3, min(body.k, 8)))
+                res = s.retriever.search(rq, k=max(3, min(body.k, 8)), section=body.section)
                 evidence = evidence_for(res, body.k)
                 s.recent.append({"q": body.q, **res.timings, "t": time.time()})
                 yield ev("retrieval", retrieval_payload(res, evidence))
@@ -191,6 +192,17 @@ def create_app(state: AppState | None = None) -> FastAPI:
             raise HTTPException(404, "Статья не найдена в индексе")
         return {"url": r["url"], "title": r["title"], "updated": r["updated"], "breadcrumbs": json.loads(r["breadcrumbs"]),
                 "sections": json.loads(r["doc"])}
+
+    @app.get("/api/sections")
+    def api_sections():
+        """Разделы верхнего уровня для фильтра «искать в…» (ключ — первый сегмент пути в /kb/)."""
+        out = []
+        for n in S().tree():
+            for c in (n["children"] if n["url"].rstrip("/").endswith("/kb") else [n]):
+                seg = c["url"].replace("https://webim.ru/kb/", "").strip("/").split("/")[0]
+                if seg and not seg.endswith(".html") and c["children"]:
+                    out.append({"key": seg, "title": c["title"], "count": c["count"]})
+        return out
 
     @app.get("/api/suggestions")
     def api_suggestions():

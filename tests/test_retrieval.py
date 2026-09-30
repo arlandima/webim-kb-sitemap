@@ -99,3 +99,11 @@ def test_unknown_entity_forces_abstention(retr):
     assert res.unknown_terms == ["Bitrix24"] and not res.confident
     res = retr.search("как подключить Elasticsearch")  # известное название — обычный поиск
     assert res.unknown_terms == [] and res.confident
+
+
+def test_section_scope_filter(retr):
+    # PAGES лежат в /kb/agents/ и /kb/devops/ — фильтр раздела ограничивает и лексику, и семантику
+    res = retr.search("подключение", section="devops", rerank=False)
+    assert res.hits and all("/kb/devops/" in h.url for h in res.hits)
+    res = retr.search("password_hashers", section="agents", rerank=False)
+    assert all("/kb/agents/" in h.url for h in res.hits)

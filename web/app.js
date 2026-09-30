@@ -1,7 +1,7 @@
 // Webim AI Knowledge — интерфейс без сборки и внешних зависимостей. Весь пользовательский текст экранируется.
 const $ = (s, r = document) => r.querySelector(s);
 const app = $("#app");
-const state = { history: [], suggestions: null, tree: null, current: null, abort: null, lastPayload: null };
+const state = { section: "", sections: null, history: [], suggestions: null, tree: null, current: null, abort: null, lastPayload: null };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const ICON_EXT = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
@@ -80,7 +80,7 @@ function wireAsk(root, onSubmit) {
 async function viewHome() {
   document.title = "База знаний Webim — вопросы своими словами";
   const sg = await suggestions();
-  const topics = (sg.topics || []).slice(0, 8);
+  const topics = (sg.topics || []).slice(0, 9);
   app.innerHTML = `
   <section class="hero"><div class="wrap">
     <h1>Спросите что угодно о Webim</h1>
@@ -155,14 +155,38 @@ function articleCard(a) {
     <div class="meta-line"><span><span class="rel" data-l="${lvl}" aria-hidden="true"><i></i><i></i><i></i></span>Релевантность: ${REL_TXT[lvl]}</span><span>${a.updated ? "обновлено " + esc(a.updated.split("-").reverse().join(".")) : ""}</span></div></a>`;
 }
 
+const SECTION_ORDER = ["for-agents", "for-admins", "for-analytics", "devops", "dev", "mobile", "bots", "channels", "integration", "control-panel", "getting-started", "apps", "faq"];
+async function loadSections() {
+  if (!state.sections) {
+    try {
+      const all = await api("/api/sections");
+      state.sections = all.sort((a, b) => (SECTION_ORDER.indexOf(a.key) + 100) % 100 - (SECTION_ORDER.indexOf(b.key) + 100) % 100);
+    } catch { state.sections = []; }
+  }
+  return state.sections;
+}
+function scopeRow(cur) {
+  const secs = state.sections || [];
+  if (!secs.length) return "";
+  return `<div class="scope"><label for="scope-sel" class="scope-l">Искать в:</label>
+    <select id="scope-sel" class="scope-sel"><option value="">Все разделы</option>
+    ${secs.map((x) => `<option value="${esc(x.key)}" ${cur === x.key ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></div>`;
+}
+
 async function viewResults(q) {
   document.title = `${q} — База знаний Webim`;
   const sg = await suggestions();
+  await loadSections();
+  state.section = new URL(location.href).searchParams.get("s") || "";
   const scen = (sg.demo || []).find((d) => d.q.trim().toLowerCase() === q.trim().toLowerCase());
   const debug = new URL(location.href).searchParams.has("debug");
-  app.innerHTML = `<div class="qbar"><div class="wrap">${askBox({ value: q, btn: "Спросить" })}</div></div>
+  app.innerHTML = `<div class="qbar"><div class="wrap">${askBox({ value: q, btn: "Спросить" })}${scopeRow(state.section)}</div></div>
     <div class="wrap"><div class="res-grid"><div class="main" id="main-col"></div><aside class="side" id="side-col" aria-label="Релевантные статьи"></aside></div></div>`;
-  wireAsk(app, (v) => { state.history = []; go(`/?q=${encodeURIComponent(v)}`); });
+  wireAsk(app, (v) => { state.history = []; go(`/?q=${encodeURIComponent(v)}${state.section ? "&s=" + encodeURIComponent(state.section) : ""}`); });
+  $("#scope-sel")?.addEventListener("change", (e) => {
+    state.history = [];
+    go(`/?q=${encodeURIComponent(q)}${e.target.value ? "&s=" + encodeURIComponent(e.target.value) : ""}`);
+  });
   const main = $("#main-col"), side = $("#side-col");
   main.innerHTML = `<div class="card answer" aria-live="polite" aria-busy="true"><div class="status"><span class="spin"></span><span id="st">Ищу по Базе знаний…</span></div><div class="skel"><i></i><i></i><i></i><i></i></div></div>`;
   side.innerHTML = `<h2>Релевантные статьи</h2><div class="card art skel" style="padding:18px"><i></i><i></i><i></i></div>`;
@@ -177,7 +201,7 @@ async function streamAnswer(q, { main, side, scen, debug, append }) {
   const answerCard = () => holder.querySelector(".answer");
   try {
     const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
-      body: JSON.stringify({ q, history: state.history.slice(-6), k: 5 }) });
+      body: JSON.stringify({ q, history: state.history.slice(-6), k: 5, section: state.section || null }) });
     if (!r.ok || !r.body) throw new Error("HTTP " + r.status);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let pending = "";

@@ -279,3 +279,9 @@ h1,h2,h3{color:var(--navy);line-height:1.2;margin:0}
 @media (max-width:820px){.kv th{width:auto}.kv td,.kv th{white-space:normal}}
 body{overflow-x:clip}
 @media (max-width:820px){.browse{grid-template-columns:minmax(0,1fr)}}
+
+/* фильтр «искать в» */
+.scope{display:flex;align-items:center;gap:8px;margin-top:10px}
+.scope-l{font-size:13.5px;color:var(--muted)}
+.scope-sel{font:inherit;font-size:13.5px;color:var(--navy);border:1px solid var(--line-strong);background:#fff;border-radius:var(--r-pill);padding:5px 30px 5px 14px;max-width:100%;cursor:pointer}
+.scope-sel:hover{border-color:var(--cyan)}

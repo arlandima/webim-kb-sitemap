@@ -38,6 +38,7 @@ class Settings:
     request_delay: float = float(_env("CRAWL_DELAY", "0.3"))
     embed_model: str = field(default_factory=lambda: _env("EMBED_MODEL", "multilingual-e5-large"))
     rerank_model: str = field(default_factory=lambda: _env("RERANK_MODEL", "bge-reranker-v2-m3"))
+    rerank_candidates: int = field(default_factory=lambda: int(_env("RERANK_CANDIDATES", "20")))
     llm_provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "openai").lower())
     llm_base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL"))
     llm_api_key: str = field(default_factory=lambda: _env("LLM_API_KEY"))

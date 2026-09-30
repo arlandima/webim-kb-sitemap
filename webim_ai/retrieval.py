@@ -14,6 +14,7 @@ from .text import highlight_terms, normalize, query_terms, stem_token
 _ENTITY = re.compile(r"[A-Za-z][A-Za-z0-9]{3,}")
 
 RRF_K = 60
+KB_ROOT = "https://webim.ru/kb/"
 
 
 @dataclass
@@ -113,24 +114,39 @@ class Retriever:
             self.ids, self.matrix = [], None
             self.head_ids, self.head_matrix = [], None
         self._meta = {}
+        self._masks = {}
+        self.url_of = {r['id']: r['url'] for r in self.store.conn.execute('SELECT id, url FROM chunks')}
 
     # ---------- этапы ----------
-    def semantic(self, query: str, limit: int = 40) -> tuple[list[tuple[int, float]], float, list[tuple[int, float]]]:
+    def _mask(self, ids: list[int], section: str) -> np.ndarray:
+        key = (id(ids), section)
+        m = self._masks.get(key)
+        if m is None:
+            pre = KB_ROOT + section + '/'
+            m = np.array([self.url_of.get(i, '').startswith(pre) for i in ids], dtype=bool)
+            self._masks[key] = m
+        return m
+
+    def semantic(self, query: str, limit: int = 40, section: str | None = None) -> tuple[list[tuple[int, float]], float, list[tuple[int, float]]]:
         if self.embedder is None or self.matrix is None or not len(self.ids):
             return [], 0.0, []
         t = time.perf_counter()
         qv = self.embedder.embed_query(query)
         t_embed = (time.perf_counter() - t) * 1000
         sims = self.matrix @ qv
+        if section:
+            sims = np.where(self._mask(self.ids, section), sims, -1.0)
         top = np.argpartition(-sims, min(limit, len(sims) - 1))[:limit]
         top = top[np.argsort(-sims[top])]
         head: list[tuple[int, float]] = []
         if self.head_matrix is not None:  # заголовочный сигнал; считается тем же вектором запроса
             hs = self.head_matrix @ qv
+            if section:
+                hs = np.where(self._mask(self.head_ids, section), hs, -1.0)
             ht = np.argpartition(-hs, min(limit, len(hs) - 1))[:limit]
             ht = ht[np.argsort(-hs[ht])]
-            head = [(self.head_ids[i], float(hs[i])) for i in ht]
-        return [(self.ids[i], float(sims[i])) for i in top], t_embed, head
+            head = [(self.head_ids[i], float(hs[i])) for i in ht if hs[i] > -0.5]
+        return [(self.ids[i], float(sims[i])) for i in top if sims[i] > -0.5], t_embed, head
 
     @staticmethod
     def fuse(lex: list[tuple[int, float]], sem: list[tuple[int, float]], w_lex: float = 1.0, w_sem: float = 1.0,
@@ -151,7 +167,7 @@ class Retriever:
             e["head_rank"], e["head_cos"] = r, s
         return out
 
-    def search(self, query: str, k: int = 8, rerank: bool = True, articles_n: int = 8) -> SearchResult:
+    def search(self, query: str, k: int = 8, rerank: bool = True, articles_n: int = 8, section: str | None = None) -> SearchResult:
         t_all = time.perf_counter()
         query = re.sub(r"\s+", " ", query or "").strip()[:500]
         timings: dict = {}
@@ -159,11 +175,14 @@ class Retriever:
             return SearchResult(query, [], [], False, 0.0, {}, {})
 
         t = time.perf_counter()
-        lex = self.store.lexical(query, 40)
+        lex = self.store.lexical(query, 300 if section else 40)
+        if section:
+            pre = KB_ROOT + section + "/"
+            lex = [(c, sc) for c, sc in lex if self.url_of.get(c, "").startswith(pre)][:40]
         timings["lexical_ms"] = round((time.perf_counter() - t) * 1000, 1)
 
         t = time.perf_counter()
-        sem, t_embed, head = self.semantic(query, 40)
+        sem, t_embed, head = self.semantic(query, 40, section)
         timings["semantic_ms"] = round((time.perf_counter() - t) * 1000, 1)
         timings["query_embedding_ms"] = round(t_embed, 1)
 
@@ -235,6 +254,8 @@ class Retriever:
     def _crumbs(self, url: str) -> tuple[list[str], str | None]:
         if not hasattr(self, "_meta"):
             self._meta = {}
+        self._masks = {}
+        self.url_of = {r['id']: r['url'] for r in self.store.conn.execute('SELECT id, url FROM chunks')}
         m = self._meta.get(url)
         if m is None:
             r = self.store.conn.execute("SELECT breadcrumbs, updated FROM articles WHERE url=?", (url,)).fetchone()
@@ -290,11 +311,27 @@ class Retriever:
         return (cos >= 0.80 and "lex_rank" in top.scores) or cos >= 0.86, top.score
 
     @staticmethod
-    def _diversify(hits: list[Hit], k: int) -> list[Hit]:
-        out, per_url = [], {}
-        for h in hits:
-            if per_url.get(h.url, 0) >= 2:
+    def _cap_per_article(cand_ids: list[int], rows: dict, cap: int, limit: int) -> list[int]:
+        """Не даём огромным справочникам (сотни чанков в одной статье) занять весь пул кандидатов для реранкера."""
+        per, out = {}, []
+        for c in cand_ids:
+            r = rows.get(c)
+            if r is None:
                 continue
+            per[r["url"]] = per.get(r["url"], 0) + 1
+            if per[r["url"]] <= cap:
+                out.append(c)
+            if len(out) >= limit:
+                break
+        return out
+
+    @staticmethod
+    def _diversify(hits: list[Hit], k: int) -> list[Hit]:
+        out, per_url, seen = [], {}, set()
+        for h in hits:
+            if per_url.get(h.url, 0) >= 2 or (h.url, h.anchor) in seen:  # одна карточка на раздел
+                continue
+            seen.add((h.url, h.anchor))
             per_url[h.url] = per_url.get(h.url, 0) + 1
             out.append(h)
             if len(out) >= k:
