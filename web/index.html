@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>База знаний Webim — вопросы своими словами</title>
+  <meta name="description" content="Умный поиск по официальной Базе знаний Webim: задайте вопрос своими словами и получите ответ со ссылками на исходные разделы документации.">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/fonts/roboto-v51-cyrillic_latin-regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <a class="skip" href="#app">Перейти к содержанию</a>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="/" data-link aria-label="Webim — База знаний, на главную">
+        <img src="/assets/logo_color.svg" alt="Webim" width="93" height="23">
+        <span class="brand-sep" aria-hidden="true"></span>
+        <span class="brand-name">База знаний</span>
+      </a>
+      <nav class="main-nav" aria-label="Основная навигация">
+        <a href="/" data-link data-nav="home">Спросить</a>
+        <a href="/browse" data-link data-nav="browse">Документация</a>
+        <a href="/demo" data-link data-nav="demo">Примеры</a>
+      </nav>
+      <a class="ghost-link" href="https://webim.ru/kb/" target="_blank" rel="noopener">Оригинальная База знаний<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></a>
+    </div>
+  </header>
+  <main id="app" tabindex="-1"></main>
+  <footer class="site-footer">
+    <div class="wrap footer-row">
+      <p>Независимый прототип на основе публичной Базы знаний <a href="https://webim.ru/kb/" target="_blank" rel="noopener">webim.ru/kb</a>. Оригинальная База знаний не изменялась: все ответы собираются из её текстов и ведут обратно на источник.</p>
+      <a class="quiet" href="/admin" data-link>Статус индекса</a>
+    </div>
+  </footer>
+  <div id="drawer-root"></div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "topics": [
+    {"title": "Начало работы", "url": "https://webim.ru/kb/getting-started/account-registration.html"},
+    {"title": "Панель управления", "url": "https://webim.ru/kb/control-panel/sections.html"},
+    {"title": "Для операторов", "url": "https://webim.ru/kb/for-agents/agent-gui/first-step.html"},
+    {"title": "Для администраторов", "url": "https://webim.ru/kb/for-admins/administrative-interface.html"},
+    {"title": "Каналы общения", "url": "https://webim.ru/kb/channels/channels-functions.html"},
+    {"title": "Боты", "url": "https://webim.ru/kb/bots/scenario-bot.html"},
+    {"title": "Интеграции", "url": "https://webim.ru/kb/integration/crm/amocrm.html"},
+    {"title": "Для разработчиков", "url": "https://webim.ru/kb/dev/technology-stack.html"}
+  ],
+  "featured": [
+    {"q": "Как сделать, чтобы клиент сначала написал вопрос, а чат создавался потом?", "tag": "Настройка чата"},
+    {"q": "Клиент написал ночью, когда никого нет на месте — куда попадёт его сообщение?", "tag": "Обращения"},
+    {"q": "Как передать диалог другому оператору?", "tag": "Работа оператора"},
+    {"q": "Как оставить в диалоге заметку, которую клиент не увидит?", "tag": "Работа оператора"},
+    {"q": "Как узнать, в каком городе находится посетитель сайта?", "tag": "Посетители"},
+    {"q": "Как сделать, чтобы чат сам предлагал помощь посетителю, который долго сидит на странице?", "tag": "Автоприглашения"}
+  ],
+  "demo": []
+}
